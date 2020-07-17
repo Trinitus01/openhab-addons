@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import javax.net.ssl.HttpsURLConnection;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -35,6 +34,7 @@ import org.apache.commons.lang.StringEscapeUtils;
 import org.apache.commons.lang.StringUtils;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.eclipse.jetty.client.api.ContentResponse;
 import org.eclipse.smarthome.core.thing.Thing;
 import org.openhab.binding.amazonechocontrol.internal.handler.AccountHandler;
 import org.openhab.binding.amazonechocontrol.internal.jsons.JsonBluetoothStates;
@@ -618,7 +618,7 @@ public class AccountServlet extends HttpServlet {
 
     void handleProxyRequest(Connection connection, HttpServletResponse resp, String verb, String url,
             @Nullable String referer, @Nullable String postData, boolean json, String site) throws IOException {
-        HttpsURLConnection urlConnection;
+        ContentResponse urlConnection;
         try {
             Map<String, String> headers = null;
             if (referer != null) {
