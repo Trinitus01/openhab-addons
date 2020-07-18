@@ -14,6 +14,7 @@ package org.openhab.binding.amazonechocontrol.internal.channelhandler;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.concurrent.CompletableFuture;
 
 import org.apache.commons.lang.StringEscapeUtils;
 import org.eclipse.jdt.annotation.NonNullByDefault;
@@ -45,7 +46,7 @@ public class ChannelHandlerAnnouncement extends ChannelHandler {
     }
 
     @Override
-    public boolean tryHandleCommand(Device device, Connection connection, String channelId, Command command)
+    public CompletableFuture<Boolean> tryHandleCommand(Device device, Connection connection, String channelId, Command command)
             throws IOException, URISyntaxException {
         if (channelId.equals(CHANNEL_NAME)) {
             if (command instanceof StringType) {

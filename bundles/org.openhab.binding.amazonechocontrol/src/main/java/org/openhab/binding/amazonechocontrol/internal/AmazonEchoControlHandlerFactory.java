@@ -36,6 +36,7 @@ import org.eclipse.smarthome.core.thing.ThingUID;
 import org.eclipse.smarthome.core.thing.binding.BaseThingHandlerFactory;
 import org.eclipse.smarthome.core.thing.binding.ThingHandler;
 import org.eclipse.smarthome.core.thing.binding.ThingHandlerFactory;
+import org.eclipse.smarthome.io.net.http.HttpClientFactory;
 import org.openhab.binding.amazonechocontrol.internal.discovery.AmazonEchoDiscovery;
 import org.openhab.binding.amazonechocontrol.internal.discovery.SmartHomeDevicesDiscovery;
 import org.openhab.binding.amazonechocontrol.internal.handler.AccountHandler;
@@ -66,15 +67,17 @@ public class AmazonEchoControlHandlerFactory extends BaseThingHandlerFactory {
     private final Map<ThingUID, @Nullable List<ServiceRegistration<?>>> discoveryServiceRegistrations = new HashMap<>();
 
     private final HttpService httpService;
+    private final HttpClientFactory httpClientFactory;
     private final StorageService storageService;
     private final BindingServlet bindingServlet;
     private final Gson gson;
 
     @Activate
-    public AmazonEchoControlHandlerFactory(@Reference HttpService httpService,
-            @Reference StorageService storageService) {
+    public AmazonEchoControlHandlerFactory(@Reference HttpService httpService, @Reference StorageService storageService,
+            @Reference HttpClientFactory httpClientFactory) {
         this.storageService = storageService;
         this.httpService = httpService;
+        this.httpClientFactory = httpClientFactory;
         this.gson = new Gson();
         this.bindingServlet = new BindingServlet(httpService);
     }
@@ -98,7 +101,8 @@ public class AmazonEchoControlHandlerFactory extends BaseThingHandlerFactory {
         if (thingTypeUID.equals(THING_TYPE_ACCOUNT)) {
             Storage<String> storage = storageService.getStorage(thing.getUID().toString(),
                     String.class.getClassLoader());
-            AccountHandler bridgeHandler = new AccountHandler((Bridge) thing, httpService, storage, gson);
+            AccountHandler bridgeHandler = new AccountHandler((Bridge) thing, httpService, storage, gson,
+                    httpClientFactory);
             registerDiscoveryService(bridgeHandler);
             bindingServlet.addAccountThing(thing);
             return bridgeHandler;

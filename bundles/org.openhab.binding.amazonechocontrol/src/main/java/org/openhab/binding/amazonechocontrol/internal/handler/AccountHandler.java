@@ -28,6 +28,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -47,6 +48,7 @@ import org.eclipse.smarthome.core.thing.binding.ThingHandler;
 import org.eclipse.smarthome.core.types.Command;
 import org.eclipse.smarthome.core.types.RefreshType;
 import org.eclipse.smarthome.core.types.State;
+import org.eclipse.smarthome.io.net.http.HttpClientFactory;
 import org.openhab.binding.amazonechocontrol.internal.AccountHandlerConfig;
 import org.openhab.binding.amazonechocontrol.internal.AccountServlet;
 import org.openhab.binding.amazonechocontrol.internal.Connection;
@@ -102,6 +104,8 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
     private final Set<SmartHomeDeviceHandler> smartHomeDeviceHandlers = new CopyOnWriteArraySet<>();
     private final Set<FlashBriefingProfileHandler> flashBriefingProfileHandlers = new CopyOnWriteArraySet<>();
 
+    private final HttpClientFactory httpClientFactory;
+
     private final Object synchronizeConnection = new Object();
     private Map<String, Device> jsonSerialNumberDeviceMapping = new HashMap<>();
     private Map<String, SmartHomeBaseDevice> jsonIdSmartHomeDeviceMapping = new HashMap<>();
@@ -129,11 +133,13 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
     private AtomicBoolean pushActivityQueueRunning = new AtomicBoolean();
     private @Nullable ScheduledFuture<?> pushActivitySenderUnblockFuture;
 
-    public AccountHandler(Bridge bridge, HttpService httpService, Storage<String> stateStorage, Gson gson) {
+    public AccountHandler(Bridge bridge, HttpService httpService, Storage<String> stateStorage, Gson gson,
+            HttpClientFactory httpClientFactory) {
         super(bridge);
         this.gson = gson;
         this.httpService = httpService;
         this.stateStorage = stateStorage;
+        this.httpClientFactory = httpClientFactory;
         channelHandlers.add(new ChannelHandlerSendMessage(this, this.gson));
     }
 
@@ -144,7 +150,7 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
         synchronized (synchronizeConnection) {
             Connection connection = this.connection;
             if (connection == null) {
-                this.connection = new Connection(null, gson);
+                this.connection = new Connection(null, gson, httpClientFactory);
             }
         }
 
@@ -490,7 +496,7 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
         ZonedDateTime timeStamp = ZonedDateTime.now();
         try {
             notifications = currentConnection.notifications();
-        } catch (IOException | URISyntaxException e) {
+        } catch (InterruptedException | ExecutionException e) {
             logger.debug("refreshNotifications failed", e);
             return;
         }
@@ -555,13 +561,13 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
                         // update notification sounds
                         try {
                             notificationSounds = currentConnection.getNotificationSounds(device);
-                        } catch (IOException | HttpException | JsonSyntaxException | ConnectionException e) {
+                        } catch (HttpException | JsonSyntaxException | ConnectionException e) {
                             logger.debug("Update notification sounds failed", e);
                         }
                         // update playlists
                         try {
                             playlists = currentConnection.getPlaylists(device);
-                        } catch (IOException | HttpException | JsonSyntaxException | ConnectionException e) {
+                        } catch (HttpException | JsonSyntaxException | ConnectionException e) {
                             logger.debug("Update playlist failed", e);
                         }
                     }
@@ -643,7 +649,7 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
             if (currentConnection.getIsLoggedIn()) {
                 devices = currentConnection.getDeviceList();
             }
-        } catch (IOException | URISyntaxException e) {
+        } catch (InterruptedException | ExecutionException e) {
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR, e.getLocalizedMessage());
         }
         if (devices != null) {
@@ -685,13 +691,11 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
         Connection currentConnection = connection;
         JsonFeed[] feeds = gson.fromJson(flashBriefingJson, JsonFeed[].class);
         if (currentConnection != null) {
-            try {
-                currentConnection.setEnabledFlashBriefings(feeds);
-            } catch (IOException | URISyntaxException e) {
-                logger.warn("Set flashbriefing profile failed", e);
-            }
+            currentConnection.setEnabledFlashBriefings(feeds).exceptionally(t -> {
+                logger.warn("Set flashbriefing profile failed", t);
+                return null;
+            }).thenRun(this::updateFlashBriefingHandlers);
         }
-        updateFlashBriefingHandlers();
     }
 
     public String getNewCurrentFlashbriefingConfiguration() {
@@ -734,22 +738,16 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
     }
 
     private void updateFlashBriefingProfiles(Connection currentConnection) {
-        try {
-            JsonFeed[] feeds = currentConnection.getEnabledFlashBriefings();
-            // Make a copy and remove changeable parts
-            JsonFeed[] forSerializer = new JsonFeed[feeds.length];
-            for (int i = 0; i < feeds.length; i++) {
-                JsonFeed source = feeds[i];
-                JsonFeed copy = new JsonFeed();
-                copy.feedId = source.feedId;
-                copy.skillId = source.skillId;
-                // Do not copy imageUrl here, because it will change
-                forSerializer[i] = copy;
+        currentConnection.getEnabledFlashBriefings().whenComplete((feeds, t) -> {
+            if (t != null) {
+                logger.warn("get flash briefing profiles fails", t);
+            } else {
+                // Make a copy and remove changeable parts
+                JsonFeed[] forSerializer = feeds.stream()
+                        .map(feed -> new JsonFeed(feed.feedId, null, feed.skillId, null)).toArray(JsonFeed[]::new);
+                this.currentFlashBriefingJson = gson.toJson(forSerializer);
             }
-            this.currentFlashBriefingJson = gson.toJson(forSerializer);
-        } catch (HttpException | JsonSyntaxException | IOException | URISyntaxException | ConnectionException e) {
-            logger.warn("get flash briefing profiles fails", e);
-        }
+        });
     }
 
     @Override
@@ -773,16 +771,13 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
                     if (refreshDataDelayed != null) {
                         refreshDataDelayed.cancel(false);
                     }
-                    this.refreshAfterCommandJob = scheduler.schedule(this::refreshAfterCommand, 700,
-                            TimeUnit.MILLISECONDS);
                     break;
                 case "PUSH_DOPPLER_CONNECTION_CHANGE":
                 case "PUSH_BLUETOOTH_STATE_CHANGE":
                     if (refreshDataDelayed != null) {
                         refreshDataDelayed.cancel(false);
                     }
-                    this.refreshAfterCommandJob = scheduler.schedule(this::refreshAfterCommand, 700,
-                            TimeUnit.MILLISECONDS);
+                    this.refreshAfterCommandJob = scheduler.schedule(this::refreshData, 700, TimeUnit.MILLISECONDS);
                     break;
                 case "PUSH_NOTIFICATION_CHANGE":
                     JsonCommandPayloadPushNotificationChange pushPayload = gson.fromJson(pushCommand.payload,
@@ -821,26 +816,28 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
     }
 
     private void queuedPushActivity() {
+        if (pushActivitySenderUnblockFuture != null) {
+            // if we came here without unblocking, we need to cancel the unblock future
+            pushActivitySenderUnblockFuture.cancel(true);
+        }
         @Nullable
         String payload = pushActivityQueue.poll();
         if (payload != null) {
-            try {
-                JsonCommandPayloadPushActivity pushActivity = gson.fromJson(payload,
-                        JsonCommandPayloadPushActivity.class);
+            JsonCommandPayloadPushActivity pushActivity = gson.fromJson(payload, JsonCommandPayloadPushActivity.class);
 
-                Key key = pushActivity.key;
-                if (key == null) {
-                    return;
-                }
+            Key key = pushActivity.key;
+            if (key == null) {
+                return;
+            }
 
-                Connection connection = this.connection;
-                if (connection == null || !connection.getIsLoggedIn()) {
-                    return;
-                }
+            Connection connection = this.connection;
+            if (connection == null || !connection.getIsLoggedIn()) {
+                return;
+            }
 
-                String search = key.registeredUserId + "#" + key.entryId;
-                Arrays.stream(connection.getActivities(10, pushActivity.timestamp))
-                        .filter(activity -> activity != null && search.equals(activity.id)).findFirst()
+            String search = key.registeredUserId + "#" + key.entryId;
+            connection.getActivities(10, pushActivity.timestamp).thenAccept(activities -> {
+                activities.stream().filter(activity -> activity != null && search.equals(activity.id)).findFirst()
                         .ifPresent(currentActivity -> {
                             SourceDeviceId[] sourceDeviceIds = currentActivity.sourceDeviceIds;
                             if (sourceDeviceIds != null) {
@@ -850,17 +847,15 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
                                         .forEach(echoHandler -> echoHandler.handlePushActivity(currentActivity));
                             }
                         });
-            } finally {
-                pushActivitySenderUnblockFuture = scheduler.schedule(this::queuedPushActivity, 5, TimeUnit.SECONDS);
-            }
+                scheduler.schedule(this::refreshData, 700, TimeUnit.MILLISECONDS);
+                queuedPushActivity();
+            });
+
+            pushActivitySenderUnblockFuture = scheduler.schedule(this::queuedPushActivity, 5, TimeUnit.SECONDS);
         } else {
             pushActivityQueueRunning.set(false);
             pushActivitySenderUnblockFuture = null;
         }
-    }
-
-    void refreshAfterCommand() {
-        refreshData();
     }
 
     private @Nullable SmartHomeBaseDevice findSmartDeviceHomeJson(SmartHomeDeviceHandler handler) {
@@ -886,17 +881,12 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
         }
 
         List<SmartHomeBaseDevice> smartHomeDevices = null;
-        try {
-            if (currentConnection.getIsLoggedIn()) {
-                smartHomeDevices = currentConnection.getSmarthomeDeviceList();
-            }
-        } catch (IOException | URISyntaxException e) {
-            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR, e.getLocalizedMessage());
-        }
-        if (smartHomeDevices != null) {
+        if (currentConnection.getIsLoggedIn()) {
+            smartHomeDevices = currentConnection.getSmarthomeDeviceList();
+
             // create new id map
             Map<String, SmartHomeBaseDevice> newJsonIdSmartHomeDeviceMapping = new HashMap<>();
-            for (Object smartHomeDevice : smartHomeDevices) {
+            for (SmartHomeBaseDevice smartHomeDevice : smartHomeDevices) {
                 if (smartHomeDevice instanceof SmartHomeBaseDevice) {
                     SmartHomeBaseDevice smartHomeBaseDevice = (SmartHomeBaseDevice) smartHomeDevice;
                     String id = smartHomeBaseDevice.findId();
@@ -906,28 +896,27 @@ public class AccountHandler extends BaseBridgeHandler implements IWebSocketComma
                 }
             }
             jsonIdSmartHomeDeviceMapping = newJsonIdSmartHomeDeviceMapping;
-        }
-        // update handlers
-        smartHomeDeviceHandlers
-                .forEach(child -> child.setDeviceAndUpdateThingState(this, findSmartDeviceHomeJson(child)));
+            // update handlers
+            smartHomeDeviceHandlers
+                    .forEach(child -> child.setDeviceAndUpdateThingState(this, findSmartDeviceHomeJson(child)));
 
-        if (smartHomeDevices != null) {
-            Map<String, SmartHomeDevice> newJsonSerialNumberSmartHomeDeviceMapping = new HashMap<>();
-            for (Object smartDevice : smartHomeDevices) {
-                if (smartDevice instanceof SmartHomeDevice) {
-                    SmartHomeDevice shd = (SmartHomeDevice) smartDevice;
-                    String entityId = shd.entityId;
-                    if (entityId != null) {
-                        newJsonSerialNumberSmartHomeDeviceMapping.put(entityId, shd);
+            if (smartHomeDevices != null) {
+                Map<String, SmartHomeDevice> newJsonSerialNumberSmartHomeDeviceMapping = new HashMap<>();
+                for (Object smartDevice : smartHomeDevices) {
+                    if (smartDevice instanceof SmartHomeDevice) {
+                        SmartHomeDevice shd = (SmartHomeDevice) smartDevice;
+                        String entityId = shd.entityId;
+                        if (entityId != null) {
+                            newJsonSerialNumberSmartHomeDeviceMapping.put(entityId, shd);
+                        }
                     }
                 }
+                jsonSerialNumberSmartHomeDeviceMapping = newJsonSerialNumberSmartHomeDeviceMapping;
             }
-            jsonSerialNumberSmartHomeDeviceMapping = newJsonSerialNumberSmartHomeDeviceMapping;
+            if (smartHomeDevices != null) {
+                return smartHomeDevices;
+            }
         }
-        if (smartHomeDevices != null) {
-            return smartHomeDevices;
-        }
-
         return Collections.emptyList();
     }
 

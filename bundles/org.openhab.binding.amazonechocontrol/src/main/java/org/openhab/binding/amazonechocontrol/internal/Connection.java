@@ -43,6 +43,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -1000,36 +1001,29 @@ public class Connection {
         return result;
     }
 
-    public @Nullable JsonPlayerState getPlayer(Device device) throws ExecutionException, InterruptedException {
-        String json = makeRequestAndReturnString(alexaServer + "/api/np/player?deviceSerialNumber="
-                + device.serialNumber + "&deviceType=" + device.deviceType + "&screenWidth=1440").get();
-        JsonPlayerState playerState = parseJson(json, JsonPlayerState.class);
-        return playerState;
+    public CompletableFuture<@Nullable JsonPlayerState> getPlayer(Device device) {
+        return makeRequestAndReturnString(alexaServer + "/api/np/player?deviceSerialNumber=" + device.serialNumber
+                + "&deviceType=" + device.deviceType + "&screenWidth=1440")
+                        .thenApply(json -> parseJson(json, JsonPlayerState.class));
     }
 
-    public @Nullable JsonMediaState getMediaState(Device device) throws ExecutionException, InterruptedException {
-        String json = makeRequestAndReturnString(alexaServer + "/api/media/state?deviceSerialNumber="
-                + device.serialNumber + "&deviceType=" + device.deviceType).get();
-        JsonMediaState mediaState = parseJson(json, JsonMediaState.class);
-        return mediaState;
+    public CompletableFuture<@Nullable JsonMediaState> getMediaState(Device device) {
+        return makeRequestAndReturnString(alexaServer + "/api/media/state?deviceSerialNumber=" + device.serialNumber
+                + "&deviceType=" + device.deviceType).thenApply(json -> parseJson(json, JsonMediaState.class));
     }
 
-    public Activity[] getActivities(int number, @Nullable Long startTime) {
-        String json;
-        try {
-            json = makeRequestAndReturnString(alexaServer + "/api/activities?startTime="
-                    + (startTime != null ? startTime : "") + "&size=" + number + "&offset=1").get();
-            JsonActivities activities = parseJson(json, JsonActivities.class);
-            if (activities != null) {
-                Activity[] activiesArray = activities.activities;
-                if (activiesArray != null) {
-                    return activiesArray;
-                }
-            }
-        } catch (InterruptedException | ExecutionException e) {
-            logger.info("getting activities failed", e);
-        }
-        return new Activity[0];
+    public CompletableFuture<List<Activity>> getActivities(int number, @Nullable Long startTime) {
+        return makeRequestAndReturnString(alexaServer + "/api/activities?startTime="
+                + (startTime != null ? startTime : "") + "&size=" + number + "&offset=1").thenApply(jsonString -> {
+                    JsonActivities activities = parseJson(jsonString, JsonActivities.class);
+                    if (activities != null) {
+                        Activity[] activiesArray = activities.activities;
+                        if (activiesArray != null) {
+                            return Arrays.asList(activiesArray);
+                        }
+                    }
+                    return Collections.emptyList();
+                });
     }
 
     public @Nullable JsonBluetoothStates getBluetoothConnectionStates() {
@@ -1554,102 +1548,121 @@ public class Connection {
         return null;
     }
 
-    public void startRoutine(Device device, String utterance) throws ExecutionException, InterruptedException {
-        JsonAutomation found = null;
-        String deviceLocale = "";
-        JsonAutomation[] routines = getRoutines();
-        if (routines == null) {
-            return;
-        }
-        for (JsonAutomation routine : getRoutines()) {
-            if (routine != null) {
-                Trigger[] triggers = routine.triggers;
-                if (triggers != null && routine.sequence != null) {
-                    for (JsonAutomation.Trigger trigger : triggers) {
-                        if (trigger == null) {
-                            continue;
-                        }
-                        Payload payload = trigger.payload;
-                        if (payload == null) {
-                            continue;
-                        }
-                        if (payload.utterance != null && payload.utterance.equalsIgnoreCase(utterance)) {
-                            found = routine;
-                            deviceLocale = payload.locale;
-                            break;
+    public void startRoutine(Device device, String utterance) {
+        getRoutines().thenAccept(routines -> {
+            JsonAutomation found = null;
+            String deviceLocale = "";
+
+            for (JsonAutomation routine : routines) {
+                if (routine != null) {
+                    Trigger[] triggers = routine.triggers;
+                    if (triggers != null && routine.sequence != null) {
+                        for (JsonAutomation.Trigger trigger : triggers) {
+                            if (trigger == null) {
+                                continue;
+                            }
+                            Payload payload = trigger.payload;
+                            if (payload == null) {
+                                continue;
+                            }
+                            if (payload.utterance != null && payload.utterance.equalsIgnoreCase(utterance)) {
+                                found = routine;
+                                deviceLocale = payload.locale;
+                                break;
+                            }
                         }
                     }
                 }
             }
-        }
-        if (found != null) {
-            String sequenceJson = gson.toJson(found.sequence);
+            if (found != null) {
+                String sequenceJson = gson.toJson(found.sequence);
 
-            JsonStartRoutineRequest request = new JsonStartRoutineRequest();
-            request.behaviorId = found.automationId;
+                JsonStartRoutineRequest request = new JsonStartRoutineRequest();
+                request.behaviorId = found.automationId;
 
-            // replace tokens
-            // "deviceType":"ALEXA_CURRENT_DEVICE_TYPE"
-            String deviceType = "\"deviceType\":\"ALEXA_CURRENT_DEVICE_TYPE\"";
-            String newDeviceType = "\"deviceType\":\"" + device.deviceType + "\"";
-            sequenceJson = sequenceJson.replace(deviceType.subSequence(0, deviceType.length()),
-                    newDeviceType.subSequence(0, newDeviceType.length()));
+                // replace tokens
+                // "deviceType":"ALEXA_CURRENT_DEVICE_TYPE"
+                String deviceType = "\"deviceType\":\"ALEXA_CURRENT_DEVICE_TYPE\"";
+                String newDeviceType = "\"deviceType\":\"" + device.deviceType + "\"";
+                sequenceJson = sequenceJson.replace(deviceType.subSequence(0, deviceType.length()),
+                        newDeviceType.subSequence(0, newDeviceType.length()));
 
-            // "deviceSerialNumber":"ALEXA_CURRENT_DSN"
-            String deviceSerial = "\"deviceSerialNumber\":\"ALEXA_CURRENT_DSN\"";
-            String newDeviceSerial = "\"deviceSerialNumber\":\"" + device.serialNumber + "\"";
-            sequenceJson = sequenceJson.replace(deviceSerial.subSequence(0, deviceSerial.length()),
-                    newDeviceSerial.subSequence(0, newDeviceSerial.length()));
+                // "deviceSerialNumber":"ALEXA_CURRENT_DSN"
+                String deviceSerial = "\"deviceSerialNumber\":\"ALEXA_CURRENT_DSN\"";
+                String newDeviceSerial = "\"deviceSerialNumber\":\"" + device.serialNumber + "\"";
+                sequenceJson = sequenceJson.replace(deviceSerial.subSequence(0, deviceSerial.length()),
+                        newDeviceSerial.subSequence(0, newDeviceSerial.length()));
 
-            // "customerId": "ALEXA_CUSTOMER_ID"
-            String customerId = "\"customerId\":\"ALEXA_CUSTOMER_ID\"";
-            String newCustomerId = "\"customerId\":\""
-                    + (this.accountCustomerId == null || this.accountCustomerId.isEmpty() ? device.deviceOwnerCustomerId
-                            : this.accountCustomerId)
-                    + "\"";
-            sequenceJson = sequenceJson.replace(customerId.subSequence(0, customerId.length()),
-                    newCustomerId.subSequence(0, newCustomerId.length()));
+                // "customerId": "ALEXA_CUSTOMER_ID"
+                String customerId = "\"customerId\":\"ALEXA_CUSTOMER_ID\"";
+                String newCustomerId = "\"customerId\":\""
+                        + (this.accountCustomerId == null || this.accountCustomerId.isEmpty()
+                                ? device.deviceOwnerCustomerId
+                                : this.accountCustomerId)
+                        + "\"";
+                sequenceJson = sequenceJson.replace(customerId.subSequence(0, customerId.length()),
+                        newCustomerId.subSequence(0, newCustomerId.length()));
 
-            // "locale": "ALEXA_CURRENT_LOCALE"
-            String locale = "\"locale\":\"ALEXA_CURRENT_LOCALE\"";
-            String newlocale = deviceLocale != null && !deviceLocale.isEmpty() ? "\"locale\":\"" + deviceLocale + "\""
-                    : "\"locale\":null";
-            sequenceJson = sequenceJson.replace(locale.subSequence(0, locale.length()),
-                    newlocale.subSequence(0, newlocale.length()));
+                // "locale": "ALEXA_CURRENT_LOCALE"
+                String locale = "\"locale\":\"ALEXA_CURRENT_LOCALE\"";
+                String newlocale = deviceLocale != null && !deviceLocale.isEmpty()
+                        ? "\"locale\":\"" + deviceLocale + "\""
+                        : "\"locale\":null";
+                sequenceJson = sequenceJson.replace(locale.subSequence(0, locale.length()),
+                        newlocale.subSequence(0, newlocale.length()));
 
-            request.sequenceJson = sequenceJson;
+                request.sequenceJson = sequenceJson;
 
-            String requestJson = gson.toJson(request);
-            makeRequest("POST", alexaServer + "/api/behaviors/preview", requestJson, true, true, null, 3);
-        } else {
-            logger.warn("Routine {} not found", utterance);
-        }
+                String requestJson = gson.toJson(request);
+                makeRequest("POST", alexaServer + "/api/behaviors/preview", requestJson, true, true, null, 3)
+                        .whenComplete((v, t) -> {
+                            if (t != null) {
+                                logger.warn("Failed to start routine {}:{}", utterance, t.getMessage());
+                            } else {
+                                if (logger.isTraceEnabled()) {
+                                    logger.trace("Starting routing {} successfull: {}", utterance,
+                                            v.getContentAsString());
+                                }
+                            }
+                        });
+            } else {
+                logger.warn("Routine {} not found", utterance);
+            }
+        });
     }
 
-    public @Nullable JsonAutomation @Nullable [] getRoutines() throws ExecutionException, InterruptedException {
-        String json = makeRequestAndReturnString(alexaServer + "/api/behaviors/automations?limit=2000").get();
-        JsonAutomation[] result = parseJson(json, JsonAutomation[].class);
-        return result;
+    public CompletableFuture<List<JsonAutomation>> getRoutines() {
+        return makeRequestAndReturnString(alexaServer + "/api/behaviors/automations?limit=2000").handle((json, t) -> {
+            if (t != null) {
+                logger.warn("Failed to get routines:", t);
+            } else {
+                JsonAutomation[] result = parseJson(json, JsonAutomation[].class);
+                if (result != null) {
+                    return Arrays.asList(result);
+                }
+            }
+            return Collections.emptyList();
+        });
     }
 
-    public JsonFeed[] getEnabledFlashBriefings() throws ExecutionException, InterruptedException {
-        String json = makeRequestAndReturnString(alexaServer + "/api/content-skills/enabled-feeds").get();
-        JsonEnabledFeeds result = parseJson(json, JsonEnabledFeeds.class);
-        if (result == null) {
-            return new JsonFeed[0];
-        }
-        JsonFeed[] enabledFeeds = result.enabledFeeds;
-        if (enabledFeeds != null) {
-            return enabledFeeds;
-        }
-        return new JsonFeed[0];
+    public CompletableFuture<List<JsonFeed>> getEnabledFlashBriefings() {
+        return makeRequestAndReturnString(alexaServer + "/api/content-skills/enabled-feeds").thenApply(json -> {
+            JsonEnabledFeeds result = parseJson(json, JsonEnabledFeeds.class);
+            if (result != null) {
+                JsonFeed[] enabledFeeds = result.enabledFeeds;
+                if (enabledFeeds != null) {
+                    return Arrays.asList(enabledFeeds);
+                }
+            }
+            return Collections.emptyList();
+        });
     }
 
-    public void setEnabledFlashBriefings(JsonFeed[] enabledFlashBriefing) {
+    public CompletableFuture<ContentResponse> setEnabledFlashBriefings(JsonFeed[] enabledFlashBriefing) {
         JsonEnabledFeeds enabled = new JsonEnabledFeeds();
         enabled.enabledFeeds = enabledFlashBriefing;
         String json = gsonWithNullSerialization.toJson(enabled);
-        makeRequest("POST", alexaServer + "/api/content-skills/enabled-feeds", json, true, true, null, 0);
+        return makeRequest("POST", alexaServer + "/api/content-skills/enabled-feeds", json, true, true, null, 0);
     }
 
     public JsonNotificationSound[] getNotificationSounds(Device device)
@@ -1681,8 +1694,8 @@ public class Connection {
         return notifications;
     }
 
-    public @Nullable JsonNotificationResponse notification(Device device, String type, @Nullable String label,
-            @Nullable JsonNotificationSound sound) throws ExecutionException, InterruptedException {
+    public void notification(Device device, String type, @Nullable String label, @Nullable JsonNotificationSound sound,
+            BiConsumer<JsonNotificationResponse, Throwable> responseHandler) {
         Date date = new Date(new Date().getTime());
         long createdDate = date.getTime();
         Date alarm = new Date(createdDate + 5000); // add 5 seconds, because amazon does not except calls for times in
@@ -1703,22 +1716,21 @@ public class Connection {
         request.id = "create" + type;
 
         String data = gsonWithNullSerialization.toJson(request);
-        String response = makeRequestAndReturnString("PUT", alexaServer + "/api/notifications/createReminder", data,
-                true, null).get();
-        JsonNotificationResponse result = parseJson(response, JsonNotificationResponse.class);
-        return result;
+        makeRequestAndReturnString("PUT", alexaServer + "/api/notifications/createReminder", data, true, null)
+                .thenApply(response -> parseJson(response, JsonNotificationResponse.class))
+                .whenComplete(responseHandler);
     }
 
-    public void stopNotification(JsonNotificationResponse notification) throws IOException, URISyntaxException {
-        makeRequestAndReturnString("DELETE", alexaServer + "/api/notifications/" + notification.id, null, true, null);
+    public CompletableFuture<String> stopNotification(JsonNotificationResponse notification)
+            throws IOException, URISyntaxException {
+        return makeRequestAndReturnString("DELETE", alexaServer + "/api/notifications/" + notification.id, null, true,
+                null);
     }
 
-    public @Nullable JsonNotificationResponse getNotificationState(JsonNotificationResponse notification)
-            throws ExecutionException, InterruptedException {
-        String response = makeRequestAndReturnString("GET", alexaServer + "/api/notifications/" + notification.id, null,
-                true, null).get();
-        JsonNotificationResponse result = parseJson(response, JsonNotificationResponse.class);
-        return result;
+    public CompletableFuture<@Nullable JsonNotificationResponse> getNotificationState(
+            JsonNotificationResponse notification) {
+        return makeRequestAndReturnString("GET", alexaServer + "/api/notifications/" + notification.id, null, true,
+                null).thenApply(response -> parseJson(response, JsonNotificationResponse.class));
     }
 
     public List<JsonMusicProvider> getMusicProviders() {
@@ -1739,8 +1751,8 @@ public class Connection {
         return Collections.emptyList();
     }
 
-    public void playMusicVoiceCommand(Device device, String providerId, String voiceCommand)
-            throws ExecutionException, InterruptedException {
+    public CompletableFuture<ContentResponse> playMusicVoiceCommand(Device device, String providerId,
+            String voiceCommand) {
         JsonPlaySearchPhraseOperationPayload payload = new JsonPlaySearchPhraseOperationPayload();
         payload.customerId = (this.accountCustomerId == null || this.accountCustomerId.isEmpty()
                 ? device.deviceOwnerCustomerId
@@ -1758,44 +1770,45 @@ public class Connection {
 
         String postDataValidate = postValidationJson.toString();
 
-        String validateResultJson = makeRequestAndReturnString("POST",
-                alexaServer + "/api/behaviors/operation/validate", postDataValidate, true, null).get();
+        return makeRequestAndReturnString("POST", alexaServer + "/api/behaviors/operation/validate", postDataValidate,
+                true, null).thenCompose(validateResultJson -> {
+                    if (validateResultJson != null && !validateResultJson.isEmpty()) {
+                        JsonPlayValidationResult validationResult = parseJson(validateResultJson,
+                                JsonPlayValidationResult.class);
+                        if (validationResult != null) {
+                            JsonPlaySearchPhraseOperationPayload validatedOperationPayload = validationResult.operationPayload;
+                            if (validatedOperationPayload != null) {
+                                payload.sanitizedSearchPhrase = validatedOperationPayload.sanitizedSearchPhrase;
+                                payload.searchPhrase = validatedOperationPayload.searchPhrase;
+                            }
+                        }
+                    }
 
-        if (validateResultJson != null && !validateResultJson.isEmpty()) {
-            JsonPlayValidationResult validationResult = parseJson(validateResultJson, JsonPlayValidationResult.class);
-            if (validationResult != null) {
-                JsonPlaySearchPhraseOperationPayload validatedOperationPayload = validationResult.operationPayload;
-                if (validatedOperationPayload != null) {
-                    payload.sanitizedSearchPhrase = validatedOperationPayload.sanitizedSearchPhrase;
-                    payload.searchPhrase = validatedOperationPayload.searchPhrase;
-                }
-            }
-        }
+                    payload.locale = null;
+                    payload.deviceSerialNumber = device.serialNumber;
+                    payload.deviceType = device.deviceType;
 
-        payload.locale = null;
-        payload.deviceSerialNumber = device.serialNumber;
-        payload.deviceType = device.deviceType;
+                    JsonObject sequenceJson = new JsonObject();
+                    sequenceJson.addProperty("@type", "com.amazon.alexa.behaviors.model.Sequence");
+                    JsonObject startNodeJson = new JsonObject();
+                    startNodeJson.addProperty("@type", "com.amazon.alexa.behaviors.model.OpaquePayloadOperationNode");
+                    startNodeJson.addProperty("type", "Alexa.Music.PlaySearchPhrase");
+                    startNodeJson.add("operationPayload", gson.toJsonTree(payload));
+                    sequenceJson.add("startNode", startNodeJson);
 
-        JsonObject sequenceJson = new JsonObject();
-        sequenceJson.addProperty("@type", "com.amazon.alexa.behaviors.model.Sequence");
-        JsonObject startNodeJson = new JsonObject();
-        startNodeJson.addProperty("@type", "com.amazon.alexa.behaviors.model.OpaquePayloadOperationNode");
-        startNodeJson.addProperty("type", "Alexa.Music.PlaySearchPhrase");
-        startNodeJson.add("operationPayload", gson.toJsonTree(payload));
-        sequenceJson.add("startNode", startNodeJson);
+                    JsonStartRoutineRequest startRoutineRequest = new JsonStartRoutineRequest();
+                    startRoutineRequest.sequenceJson = sequenceJson.toString();
+                    startRoutineRequest.status = null;
 
-        JsonStartRoutineRequest startRoutineRequest = new JsonStartRoutineRequest();
-        startRoutineRequest.sequenceJson = sequenceJson.toString();
-        startRoutineRequest.status = null;
-
-        String postData = gson.toJson(startRoutineRequest);
-        makeRequest("POST", alexaServer + "/api/behaviors/preview", postData, true, true, null, 3);
+                    String postData = gson.toJson(startRoutineRequest);
+                    return makeRequest("POST", alexaServer + "/api/behaviors/preview", postData, true, true, null, 3);
+                });
     }
 
-    public @Nullable JsonEqualizer getEqualizer(Device device) throws ExecutionException, InterruptedException {
-        String json = makeRequestAndReturnString(
-                alexaServer + "/api/equalizer/" + device.serialNumber + "/" + device.deviceType).get();
-        return parseJson(json, JsonEqualizer.class);
+    public CompletableFuture<@Nullable JsonEqualizer> getEqualizer(Device device) {
+        return makeRequestAndReturnString(
+                alexaServer + "/api/equalizer/" + device.serialNumber + "/" + device.deviceType)
+                        .thenApply(json -> parseJson(json, JsonEqualizer.class));
     }
 
     public void setEqualizer(Device device, JsonEqualizer settings) throws IOException, URISyntaxException {

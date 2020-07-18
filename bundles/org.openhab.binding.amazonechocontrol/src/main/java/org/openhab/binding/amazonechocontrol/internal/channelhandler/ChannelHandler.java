@@ -14,6 +14,7 @@ package org.openhab.binding.amazonechocontrol.internal.channelhandler;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.concurrent.CompletableFuture;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
@@ -34,7 +35,7 @@ import com.google.gson.JsonSyntaxException;
 @NonNullByDefault
 public abstract class ChannelHandler {
 
-    public abstract boolean tryHandleCommand(Device device, Connection connection, String channelId, Command command)
+    public abstract CompletableFuture<Boolean> tryHandleCommand(Device device, Connection connection, String channelId, Command command)
             throws IOException, URISyntaxException;
 
     protected final IAmazonThingHandler thingHandler;

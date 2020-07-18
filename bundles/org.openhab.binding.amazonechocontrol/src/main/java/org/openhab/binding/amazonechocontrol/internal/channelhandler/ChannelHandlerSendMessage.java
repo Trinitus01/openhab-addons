@@ -12,9 +12,9 @@
  */
 package org.openhab.binding.amazonechocontrol.internal.channelhandler;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
@@ -43,35 +43,35 @@ public class ChannelHandlerSendMessage extends ChannelHandler {
     }
 
     @Override
-    public boolean tryHandleCommand(Device device, Connection connection, String channelId, Command command)
-            throws IOException, URISyntaxException {
-        if (channelId.equals(CHANNEL_NAME)) {
-            if (command instanceof StringType) {
-                String commandValue = ((StringType) command).toFullString();
+    public CompletableFuture<Boolean> tryHandleCommand(Device device, Connection connection, String channelId, Command command) {
+        if (!channelId.equals(CHANNEL_NAME)) {
+        return CompletableFuture.completedFuture(false);
+        }
+        if (!(command instanceof StringType)) {
+            refreshChannel();
+            return CompletableFuture.completedFuture(false);
+        }
+                String commandValue = command.toFullString();
                 String baseUrl = "https://alexa-comms-mobile-service." + connection.getAmazonSite();
 
                 AccountJson currentAccountJson = this.accountJson;
                 if (currentAccountJson == null) {
-                    String accountResult = connection.makeRequestAndReturnString(baseUrl + "/accounts");
-                    AccountJson @Nullable [] accountsJson = gson.fromJson(accountResult, AccountJson[].class);
-                    if (accountsJson == null) {
-                        return false;
-                    }
-                    for (AccountJson accountJson : accountsJson) {
-                        Boolean signedInUser = accountJson.signedInUser;
-                        if (signedInUser != null && signedInUser) {
-                            this.accountJson = accountJson;
-                            currentAccountJson = accountJson;
-                            break;
+                    return connection.makeRequestAndReturnString(baseUrl + "/accounts").thenCompose(accountResult -> {
+                        AccountJson @Nullable [] accountsJson = gson.fromJson(accountResult, AccountJson[].class);
+                        if (accountsJson != null) {
+                            Arrays.stream(accountsJson).filter(accountJson -> accountJson != null && accountJson.signedInUser != null && accountJson.signedInUser).findAny()
+                                    .ifPresent(accountJson -> {
+                                        this.accountJson = accountJson;
+                                    });
+                            return tryHandleCommand(device, connection, channelId, command);
                         }
-                    }
+                        return CompletableFuture.completedFuture(false);
+                    }).exceptionally(t -> false);
                 }
-                if (currentAccountJson == null) {
-                    return false;
-                }
+
                 String commsId = currentAccountJson.commsId;
                 if (commsId == null) {
-                    return false;
+                    return CompletableFuture.completedFuture(false);
                 }
                 String senderCommsId = commsId;
                 String receiverCommsId = commsId;
@@ -87,11 +87,14 @@ public class ChannelHandlerSendMessage extends ChannelHandler {
                 String sendConversationBody = this.gson.toJson(new SendConversationJson[] { conversationJson });
                 String sendUrl = baseUrl + "/users/" + senderCommsId + "/conversations/" + receiverCommsId
                         + "/messages";
-                connection.makeRequestAndReturnString("POST", sendUrl, sendConversationBody, true, null);
-            }
-            refreshChannel();
-        }
-        return false;
+                return connection.makeRequestAndReturnString("POST", sendUrl, sendConversationBody, true, null).handle((v, t) -> {
+                    if (t!= null) {
+                        return false;
+                    } else {
+                        refreshChannel();
+                        return true;
+                    }
+                });
     }
 
     private void refreshChannel() {
