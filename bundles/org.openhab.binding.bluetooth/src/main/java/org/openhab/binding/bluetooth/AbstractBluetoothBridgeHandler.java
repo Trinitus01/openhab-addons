@@ -13,6 +13,7 @@
 package org.openhab.binding.bluetooth;
 
 import java.time.ZonedDateTime;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +28,7 @@ import org.eclipse.smarthome.core.thing.ChannelUID;
 import org.eclipse.smarthome.core.thing.Thing;
 import org.eclipse.smarthome.core.thing.ThingUID;
 import org.eclipse.smarthome.core.thing.binding.BaseBridgeHandler;
+import org.eclipse.smarthome.core.thing.binding.ThingHandler;
 import org.eclipse.smarthome.core.types.Command;
 import org.openhab.binding.bluetooth.BluetoothDevice.ConnectionState;
 import org.slf4j.Logger;
@@ -205,8 +207,40 @@ public abstract class AbstractBluetoothBridgeHandler<BD extends BluetoothDevice>
             // no point in discovering a device that already has a handler
             return;
         }
+        
+        boolean deviceReachable = deviceReachable(device);
+        
+        if (deviceReachable) {
+            String name = device.getName();
+            if (name != null && name.length() > 0 && !name.equals(device.getAddress().toString().replace(':', '-'))) {
+                String manufacturer = BluetoothCompanyIdentifiers.get(device.getManufacturerId());
+                if (manufacturer != null) {
+                    name += " (" + manufacturer + ")";
+                }
+                for (Thing childThing : getThing().getThings()) {
+                    String label = childThing.getLabel();
+                    if (name.equals(label)) {
+                        ThingHandler thingHandler = childThing.getHandler();
+                        if (thingHandler != null) {
+                            logger.info("Resync mac for device {}", label);
+                            
+                            Map<String, Object> properties = new HashMap<>();
+                            properties.put(BluetoothBindingConstants.CONFIGURATION_ADDRESS, device.getAddress().toString());
+
+                            removeDevice(device);
+
+                            thingHandler.dispose();
+                            thingHandler.handleConfigurationUpdate(properties);
+                            thingHandler.initialize();
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
         if (config.backgroundDiscovery || activeScanEnabled) {
-            if (deviceReachable(device)) {
+            if (deviceReachable) {
                 discoveryListeners.forEach(listener -> listener.deviceDiscovered(device));
             } else {
                 logger.trace("Not notifying listeners for device '{}', because it is not reachable.",
