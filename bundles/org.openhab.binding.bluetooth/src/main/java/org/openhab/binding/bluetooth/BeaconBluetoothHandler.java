@@ -45,7 +45,8 @@ public class BeaconBluetoothHandler extends BaseThingHandler implements Bluetoot
     
     private final Logger logger = LoggerFactory.getLogger(BeaconBluetoothHandler.class);
     private @Nullable ScheduledFuture<?> unavailableJob;
-    private RssiKalmanFilter rssiKalmanFilter = new RssiKalmanFilter();;
+    private KalmanFilter kalmanFilter = new KalmanFilter();
+    private BeaconDistance beaconDistance = new BeaconDistance();
 
     @NonNullByDefault({} /* non-null if initialized */)
     protected BluetoothAdapter adapter;
@@ -140,18 +141,22 @@ public class BeaconBluetoothHandler extends BaseThingHandler implements Bluetoot
         }
         
         if (rssi != null && rssi != 0) {
-            rssi = (int)rssiKalmanFilter.applyRssiKalmanFilter(rssi);
+            rssi = (int)kalmanFilter.applyFilter(rssi);
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_RSSI, new DecimalType(rssi));
+            double distance = beaconDistance.calculateDistanceFromRssi(rssi, -60);
+            updateState(BluetoothBindingConstants.CHANNEL_TYPE_DISTANCE, new DecimalType(distance));
             updateStatusBasedOnRssi(true);
         } else {
-            rssiKalmanFilter.resetRssiKalmanFilter();
+            kalmanFilter.resetFilter();
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_RSSI, UnDefType.NULL);
+            updateState(BluetoothBindingConstants.CHANNEL_TYPE_DISTANCE, UnDefType.NULL);
             updateStatusBasedOnRssi(false);
         }
         
         unavailableJob = scheduler.schedule(() -> {
-            rssiKalmanFilter.resetRssiKalmanFilter();
+            kalmanFilter.resetFilter();
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_RSSI, UnDefType.NULL);
+            updateState(BluetoothBindingConstants.CHANNEL_TYPE_DISTANCE, UnDefType.NULL);
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.NONE);
         }, 30, TimeUnit.SECONDS);
     }

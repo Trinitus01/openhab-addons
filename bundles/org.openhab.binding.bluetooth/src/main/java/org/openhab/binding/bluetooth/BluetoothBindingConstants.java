@@ -33,6 +33,7 @@ public class BluetoothBindingConstants {
 
     // List of all Channel Type IDs
     public static final String CHANNEL_TYPE_RSSI = "rssi";
+    public static final String CHANNEL_TYPE_DISTANCE = "distance";
 
     public static final String PROPERTY_TXPOWER = "txpower";
     public static final String PROPERTY_MAXCONNECTIONS = "maxconnections";

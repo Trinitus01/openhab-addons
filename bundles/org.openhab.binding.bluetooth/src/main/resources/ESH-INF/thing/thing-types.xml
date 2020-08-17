@@ -14,6 +14,7 @@
 		<description>A generic Bluetooth device in beacon-mode</description>
 		<channels>
 			<channel id="rssi" typeId="rssi"/>
+			<channel id="distance" typeId="distance"/>
 		</channels>
 
 		<config-description>
@@ -34,6 +35,7 @@
 		<description>A generic Bluetooth device in connected-mode</description>
 		<channels>
 			<channel id="rssi" typeId="rssi"/>
+			<channel id="distance" typeId="distance"/>
 		</channels>
 
 		<config-description>

@@ -11,5 +11,13 @@
 		<category>QualityOfService</category>
 		<state readOnly="true" pattern="%d dBm"/>
 	</channel-type>
+	
+	<channel-type id="distance">
+		<item-type>Number</item-type>
+		<label>Distance</label>
+		<description>Calculated distance indicator</description>
+		<category>QualityOfService</category>
+		<state readOnly="true" pattern="%d m"/>
+	</channel-type>
 
 </thing:thing-descriptions>
