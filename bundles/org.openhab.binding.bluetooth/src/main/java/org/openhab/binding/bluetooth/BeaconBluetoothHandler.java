@@ -12,6 +12,8 @@
  */
 package org.openhab.binding.bluetooth;
 
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
@@ -29,6 +31,8 @@ import org.eclipse.smarthome.core.types.RefreshType;
 import org.eclipse.smarthome.core.types.UnDefType;
 import org.openhab.binding.bluetooth.notification.BluetoothConnectionStatusNotification;
 import org.openhab.binding.bluetooth.notification.BluetoothScanNotification;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * This is a handler for generic Bluetooth devices in beacon-mode (i.e. not connected), which at the same time can be
@@ -38,6 +42,10 @@ import org.openhab.binding.bluetooth.notification.BluetoothScanNotification;
  */
 @NonNullByDefault
 public class BeaconBluetoothHandler extends BaseThingHandler implements BluetoothDeviceListener {
+    
+    private final Logger logger = LoggerFactory.getLogger(BeaconBluetoothHandler.class);
+    private @Nullable ScheduledFuture<?> unavailableJob;
+    private RssiKalmanFilter rssiKalmanFilter = new RssiKalmanFilter();;
 
     @NonNullByDefault({} /* non-null if initialized */)
     protected BluetoothAdapter adapter;
@@ -102,6 +110,11 @@ public class BeaconBluetoothHandler extends BaseThingHandler implements Bluetoot
         } finally {
             deviceLock.unlock();
         }
+        
+        if (unavailableJob != null) {
+            unavailableJob.cancel(true);
+            unavailableJob = null;
+        }
     }
 
     @Override
@@ -121,13 +134,26 @@ public class BeaconBluetoothHandler extends BaseThingHandler implements Bluetoot
     }
 
     private void updateRSSI(@Nullable Integer rssi) {
+        if (unavailableJob != null) {
+            unavailableJob.cancel(true);
+            unavailableJob = null;
+        }
+        
         if (rssi != null && rssi != 0) {
+            rssi = (int)rssiKalmanFilter.applyRssiKalmanFilter(rssi);
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_RSSI, new DecimalType(rssi));
             updateStatusBasedOnRssi(true);
         } else {
+            rssiKalmanFilter.resetRssiKalmanFilter();
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_RSSI, UnDefType.NULL);
             updateStatusBasedOnRssi(false);
         }
+        
+        unavailableJob = scheduler.schedule(() -> {
+            rssiKalmanFilter.resetRssiKalmanFilter();
+            updateState(BluetoothBindingConstants.CHANNEL_TYPE_RSSI, UnDefType.NULL);
+            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.NONE);
+        }, 30, TimeUnit.SECONDS);
     }
 
     /**

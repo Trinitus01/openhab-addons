@@ -201,44 +201,45 @@ public abstract class AbstractBluetoothBridgeHandler<BD extends BluetoothDevice>
         }
         return false;
     }
+    
+    private void resyncMACForDevice(BluetoothDevice device) {
+        String name = device.getName();
+        if (name != null && name.length() > 0 && !name.equals(device.getAddress().toString().replace(':', '-'))) {
+            String manufacturer = BluetoothCompanyIdentifiers.get(device.getManufacturerId());
+            if (manufacturer != null) {
+                name += " (" + manufacturer + ")";
+            }
+            for (Thing childThing : getThing().getThings()) {
+                String label = childThing.getLabel();
+                if (name.equals(label)) {
+                    ThingHandler thingHandler = childThing.getHandler();
+                    if (thingHandler != null) {
+                        logger.info("Resync mac for device {}", label);
+
+                        Map<String, Object> properties = new HashMap<>();
+                        properties.put(BluetoothBindingConstants.CONFIGURATION_ADDRESS, device.getAddress().toString());
+
+                        removeDevice(device);
+
+                        thingHandler.dispose();
+                        thingHandler.handleConfigurationUpdate(properties);
+                        thingHandler.initialize();
+                    }
+                    break;
+                }
+            }
+        }
+    }
 
     public void deviceDiscovered(BluetoothDevice device) {
         if (hasHandlerForDevice(device.getAddress())) {
             // no point in discovering a device that already has a handler
             return;
         }
-        
         boolean deviceReachable = deviceReachable(device);
-        
         if (deviceReachable) {
-            String name = device.getName();
-            if (name != null && name.length() > 0 && !name.equals(device.getAddress().toString().replace(':', '-'))) {
-                String manufacturer = BluetoothCompanyIdentifiers.get(device.getManufacturerId());
-                if (manufacturer != null) {
-                    name += " (" + manufacturer + ")";
-                }
-                for (Thing childThing : getThing().getThings()) {
-                    String label = childThing.getLabel();
-                    if (name.equals(label)) {
-                        ThingHandler thingHandler = childThing.getHandler();
-                        if (thingHandler != null) {
-                            logger.info("Resync mac for device {}", label);
-                            
-                            Map<String, Object> properties = new HashMap<>();
-                            properties.put(BluetoothBindingConstants.CONFIGURATION_ADDRESS, device.getAddress().toString());
-
-                            removeDevice(device);
-
-                            thingHandler.dispose();
-                            thingHandler.handleConfigurationUpdate(properties);
-                            thingHandler.initialize();
-                        }
-                        break;
-                    }
-                }
-            }
+            resyncMACForDevice(device);
         }
-        
         if (config.backgroundDiscovery || activeScanEnabled) {
             if (deviceReachable) {
                 discoveryListeners.forEach(listener -> listener.deviceDiscovered(device));
