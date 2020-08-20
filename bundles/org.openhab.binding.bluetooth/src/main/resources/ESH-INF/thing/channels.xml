@@ -11,7 +11,7 @@
 		<category>QualityOfService</category>
 		<state readOnly="true" pattern="%d dBm"/>
 	</channel-type>
-	
+
 	<channel-type id="distance">
 		<item-type>Number</item-type>
 		<label>Distance</label>

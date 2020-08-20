@@ -17,25 +17,14 @@ package org.openhab.binding.bluetooth;
  * @author Tom Blum - Initial contribution
  */
 public class BeaconDistance {
-    
-    private double coefficientA = 0.42093;
-    private double coefficientB = 6.9476;
-    private double coefficientC = 0.54992;
-    
+
     public BeaconDistance() {
         // DO NOTHING
     }
-    
-    public double calculateDistanceFromRssi(double rssi, int txPower) {
-        double distance;
-        double ratio = rssi / txPower;
-        
-        if (ratio < 1.0) {
-            distance = Math.pow(ratio, 10);
-        } else {
-            distance =  coefficientA * Math.pow(ratio, coefficientB) + coefficientC;
-        }
-        
+
+    public double calculateDistanceFromRssi(double rssi, int txPower, int environmentalfactor) {
+        double distance = Math.pow(10, ((txPower - rssi) / (10 * environmentalfactor)));
+
         return distance;
     }
 }

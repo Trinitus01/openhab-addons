@@ -201,8 +201,8 @@ public abstract class AbstractBluetoothBridgeHandler<BD extends BluetoothDevice>
         }
         return false;
     }
-    
-    private void resyncMACForDevice(BluetoothDevice device) {
+
+    private void synchronizeMACForDevice(BluetoothDevice device) {
         String name = device.getName();
         if (name != null && name.length() > 0 && !name.equals(device.getAddress().toString().replace(':', '-'))) {
             String manufacturer = BluetoothCompanyIdentifiers.get(device.getManufacturerId());
@@ -214,16 +214,21 @@ public abstract class AbstractBluetoothBridgeHandler<BD extends BluetoothDevice>
                 if (name.equals(label)) {
                     ThingHandler thingHandler = childThing.getHandler();
                     if (thingHandler != null) {
-                        logger.info("Resync mac for device {}", label);
+                        BeaconBluetoothHandler beaconBluetoothHandler = (BeaconBluetoothHandler) thingHandler;
+                        boolean synchronizeMac = beaconBluetoothHandler.bluetoothBindingConfiguration.synchronizemac;
+                        if (synchronizeMac) {
+                            logger.info("Resync mac for device {}", label);
 
-                        Map<String, Object> properties = new HashMap<>();
-                        properties.put(BluetoothBindingConstants.CONFIGURATION_ADDRESS, device.getAddress().toString());
+                            Map<String, Object> properties = new HashMap<>();
+                            properties.put(BluetoothBindingConstants.CONFIGURATION_ADDRESS,
+                                    device.getAddress().toString());
 
-                        removeDevice(device);
+                            removeDevice(device);
 
-                        thingHandler.dispose();
-                        thingHandler.handleConfigurationUpdate(properties);
-                        thingHandler.initialize();
+                            thingHandler.dispose();
+                            thingHandler.handleConfigurationUpdate(properties);
+                            thingHandler.initialize();
+                        }
                     }
                     break;
                 }
@@ -238,7 +243,7 @@ public abstract class AbstractBluetoothBridgeHandler<BD extends BluetoothDevice>
         }
         boolean deviceReachable = deviceReachable(device);
         if (deviceReachable) {
-            resyncMACForDevice(device);
+            synchronizeMACForDevice(device);
         }
         if (config.backgroundDiscovery || activeScanEnabled) {
             if (deviceReachable) {

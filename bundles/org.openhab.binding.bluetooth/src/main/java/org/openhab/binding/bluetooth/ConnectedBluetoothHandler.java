@@ -58,8 +58,8 @@ public class ConnectedBluetoothHandler extends BeaconBluetoothHandler {
 
     protected final Set<BluetoothCharacteristic> deviceCharacteristics = new CopyOnWriteArraySet<>();
 
-    public ConnectedBluetoothHandler(Thing thing) {
-        super(thing);
+    public ConnectedBluetoothHandler(Thing thing, BluetoothBindingConfiguration bluetoothBindingConfiguration) {
+        super(thing, bluetoothBindingConfiguration);
     }
 
     @Override

@@ -42,8 +42,9 @@ import org.slf4j.LoggerFactory;
  */
 @NonNullByDefault
 public class BeaconBluetoothHandler extends BaseThingHandler implements BluetoothDeviceListener {
-    
+
     private final Logger logger = LoggerFactory.getLogger(BeaconBluetoothHandler.class);
+    public BluetoothBindingConfiguration bluetoothBindingConfiguration = new BluetoothBindingConfiguration();
     private @Nullable ScheduledFuture<?> unavailableJob;
     private KalmanFilter kalmanFilter = new KalmanFilter();
     private BeaconDistance beaconDistance = new BeaconDistance();
@@ -59,8 +60,9 @@ public class BeaconBluetoothHandler extends BaseThingHandler implements Bluetoot
 
     protected final ReentrantLock deviceLock;
 
-    public BeaconBluetoothHandler(Thing thing) {
+    public BeaconBluetoothHandler(Thing thing, BluetoothBindingConfiguration bluetoothBindingConfiguration) {
         super(thing);
+        this.bluetoothBindingConfiguration = bluetoothBindingConfiguration;
         deviceLock = new ReentrantLock();
     }
 
@@ -111,7 +113,7 @@ public class BeaconBluetoothHandler extends BaseThingHandler implements Bluetoot
         } finally {
             deviceLock.unlock();
         }
-        
+
         if (unavailableJob != null) {
             unavailableJob.cancel(true);
             unavailableJob = null;
@@ -139,11 +141,20 @@ public class BeaconBluetoothHandler extends BaseThingHandler implements Bluetoot
             unavailableJob.cancel(true);
             unavailableJob = null;
         }
-        
+
         if (rssi != null && rssi != 0) {
-            rssi = (int)kalmanFilter.applyFilter(rssi);
+            KalmanFilter.FilterType kalmanFilterType = KalmanFilter.FilterType
+                    .valueOf(bluetoothBindingConfiguration.kalmanfiltertype);
+            if (!KalmanFilter.FilterType.NONE.equals(kalmanFilterType)) {
+                rssi = (int) kalmanFilter.applyFilter(rssi, kalmanFilterType);
+            }
+            int txPower = getConfig().containsKey(BluetoothBindingConstants.PROPERTY_TXPOWER)
+                    ? Integer.valueOf(getConfig().get(BluetoothBindingConstants.PROPERTY_TXPOWER).toString())
+                    : -69;
+            int environmentalFactor = bluetoothBindingConfiguration.environmentalfactor;
+            double distance = beaconDistance.calculateDistanceFromRssi(rssi, txPower, environmentalFactor);
+
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_RSSI, new DecimalType(rssi));
-            double distance = beaconDistance.calculateDistanceFromRssi(rssi, -60);
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_DISTANCE, new DecimalType(distance));
             updateStatusBasedOnRssi(true);
         } else {
@@ -152,13 +163,14 @@ public class BeaconBluetoothHandler extends BaseThingHandler implements Bluetoot
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_DISTANCE, UnDefType.NULL);
             updateStatusBasedOnRssi(false);
         }
-        
+
+        int onlineTimeout = bluetoothBindingConfiguration.onlinetimeout;
         unavailableJob = scheduler.schedule(() -> {
             kalmanFilter.resetFilter();
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_RSSI, UnDefType.NULL);
             updateState(BluetoothBindingConstants.CHANNEL_TYPE_DISTANCE, UnDefType.NULL);
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.NONE);
-        }, 30, TimeUnit.SECONDS);
+        }, onlineTimeout, TimeUnit.SECONDS);
     }
 
     /**

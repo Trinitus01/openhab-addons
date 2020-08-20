@@ -6,4 +6,43 @@
 	<name>Bluetooth Binding</name>
 	<description>This binding supports the Bluetooth protocol.</description>
 
+	<config-description>
+		<parameter name="kalmanfiltertype" type="text">
+			<label>Kalman filter (RSSI)</label>
+			<description>Kalman filter to removes noise and spikes from RSSI.</description>
+			<default>MODERATE</default>
+			<options>
+				<option value="NONE">None</option>
+				<option value="FAST">Fast (less latency, more spikes)</option>
+				<option value="MODERATE">Moderate (medium latency, medium spikes)</option>
+				<option value="SLOW">Slow (more latency, less spikes)</option>
+				<option value="VERY_SLOW">Very slow (used for stationary devices)</option>
+			</options>
+			<required>true</required>
+		</parameter>
+		<parameter name="environmentalfactor" type="integer" min="2" max="4">
+			<label>Environmental factor (Distance)</label>
+			<description>Constant depends on the environmental factor.</description>
+			<options>
+				<option value="2">Outdoors, no obstacles</option>
+				<option value="3">Indoors, moderate obstacles</option>
+				<option value="4">Indoors, walls and furniture</option>
+			</options>
+			<default>3</default>
+			<required>true</required>
+		</parameter>
+		<parameter name="onlinetimeout" type="integer" min="0" unit="s" groupName="presence-detection">
+			<label>Online timeout</label>
+			<description>Bluetooth devices not showing any activity are considered to be offline after exceeding this timeout
+				(seconds).</description>
+			<default>30</default>
+			<required>true</required>
+		</parameter>
+		<parameter name="synchronizemac" type="boolean">
+			<label>Synchronize MAC address (Mobile Phones)</label>
+			<description>Use the device name to synchronize the MAC address.</description>
+			<default>true</default>
+		</parameter>
+	</config-description>
+
 </binding:binding>

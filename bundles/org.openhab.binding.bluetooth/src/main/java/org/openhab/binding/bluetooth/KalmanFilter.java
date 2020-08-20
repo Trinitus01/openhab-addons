@@ -17,7 +17,23 @@ package org.openhab.binding.bluetooth;
  * @author Tom Blum - Initial contribution
  */
 public class KalmanFilter {
-    
+
+    public enum FilterType {
+        NONE(0, 0),
+        FAST(0.125, 0.8),
+        MODERATE(0.125, 5),
+        SLOW(0.125, 15),
+        VERY_SLOW(0.125, 120);
+
+        private final double processNoise;
+        private final double measurmentNoise;
+
+        FilterType(double processNoise, double measurmentNoise) {
+            this.processNoise = processNoise;
+            this.measurmentNoise = measurmentNoise;
+        }
+    }
+
     private double processNoise;
     private double measurementNoise;
     private double estimatedRSSI;
@@ -25,23 +41,28 @@ public class KalmanFilter {
     private boolean isInitialized = false;
 
     public KalmanFilter() {
-        this.processNoise = 0.125;
-        this.measurementNoise = 0.8;
+        // DO NOTHING
     }
 
-    public KalmanFilter(double processNoise, double measurementNoise) {
-        this.processNoise = processNoise;
-        this.measurementNoise = measurementNoise;
-    }
-    
-    public double applyFilter(double rssi) {
+    public double applyFilter(double rssi, FilterType filterType) {
         double priorRSSI;
         double kalmanGain;
         double priorErrorCovarianceRSSI;
-        
+
+        if (processNoise != filterType.processNoise) {
+            processNoise = filterType.processNoise;
+            isInitialized = false;
+        }
+        if (measurementNoise != filterType.measurmentNoise) {
+            measurementNoise = filterType.measurmentNoise;
+            isInitialized = false;
+        }
+
         if (!isInitialized) {
             priorRSSI = rssi;
             priorErrorCovarianceRSSI = 1;
+            estimatedRSSI = 0;
+            errorCovarianceRSSI = 0;
             isInitialized = true;
         } else {
             priorRSSI = estimatedRSSI;
@@ -54,10 +75,8 @@ public class KalmanFilter {
 
         return estimatedRSSI;
     }
-    
+
     public void resetFilter() {
-        estimatedRSSI = 0;
-        errorCovarianceRSSI = 0;
         isInitialized = false;
     }
 }
