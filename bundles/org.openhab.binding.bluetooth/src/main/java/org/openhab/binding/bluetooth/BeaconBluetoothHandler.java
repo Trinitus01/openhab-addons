@@ -44,7 +44,7 @@ import org.slf4j.LoggerFactory;
 public class BeaconBluetoothHandler extends BaseThingHandler implements BluetoothDeviceListener {
 
     private final Logger logger = LoggerFactory.getLogger(BeaconBluetoothHandler.class);
-    public BluetoothBindingConfiguration bluetoothBindingConfiguration = new BluetoothBindingConfiguration();
+    protected BluetoothBindingConfiguration bluetoothBindingConfiguration = new BluetoothBindingConfiguration();
     private @Nullable ScheduledFuture<?> unavailableJob;
     private KalmanFilter kalmanFilter = new KalmanFilter();
     private BeaconDistance beaconDistance = new BeaconDistance();

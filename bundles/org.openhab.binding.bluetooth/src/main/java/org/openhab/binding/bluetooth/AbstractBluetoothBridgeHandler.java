@@ -205,32 +205,33 @@ public abstract class AbstractBluetoothBridgeHandler<BD extends BluetoothDevice>
     private void synchronizeMACForDevice(BluetoothDevice device) {
         String name = device.getName();
         if (name != null && name.length() > 0 && !name.equals(device.getAddress().toString().replace(':', '-'))) {
-            String manufacturer = BluetoothCompanyIdentifiers.get(device.getManufacturerId());
-            if (manufacturer != null) {
-                name += " (" + manufacturer + ")";
-            }
             for (Thing childThing : getThing().getThings()) {
-                String label = childThing.getLabel();
-                if (name.equals(label)) {
-                    ThingHandler thingHandler = childThing.getHandler();
-                    if (thingHandler != null) {
-                        BeaconBluetoothHandler beaconBluetoothHandler = (BeaconBluetoothHandler) thingHandler;
-                        boolean synchronizeMac = beaconBluetoothHandler.bluetoothBindingConfiguration.synchronizemac;
-                        if (synchronizeMac) {
-                            logger.info("Resync mac for device {}", label);
+                boolean synchronizeMac = childThing.getConfiguration()
+                        .containsKey(BluetoothBindingConstants.PROPERTY_SYNCHRONIZEMAC)
+                                ? (boolean) childThing.getConfiguration()
+                                        .get(BluetoothBindingConstants.PROPERTY_SYNCHRONIZEMAC)
+                                : false;
+                if (synchronizeMac) {
+                    Object childModelId = childThing.getProperties().get(Thing.PROPERTY_MODEL_ID);
+                    if (name.equals(childModelId)) {
+                        ThingHandler thingHandler = childThing.getHandler();
+                        if (thingHandler != null) {
+                            logger.info("Synchronize mac for device {}", childThing.getLabel());
 
                             Map<String, Object> properties = new HashMap<>();
                             properties.put(BluetoothBindingConstants.CONFIGURATION_ADDRESS,
                                     device.getAddress().toString());
-
+                            
                             removeDevice(device);
+                            
+                            childThing.setProperty(Thing.PROPERTY_MAC_ADDRESS, device.getAddress().toString());
 
                             thingHandler.dispose();
                             thingHandler.handleConfigurationUpdate(properties);
                             thingHandler.initialize();
                         }
+                        break;
                     }
-                    break;
                 }
             }
         }

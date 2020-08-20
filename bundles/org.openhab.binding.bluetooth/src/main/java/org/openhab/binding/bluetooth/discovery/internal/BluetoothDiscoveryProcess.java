@@ -134,14 +134,15 @@ public class BluetoothDiscoveryProcess implements Supplier<DiscoveryResult>, Blu
     }
 
     private DiscoveryResult createDefaultResult(BluetoothDevice device) {
+        Map<String, Object> properties = new HashMap<>();
         // We did not find a thing type for this device, so let's treat it as a generic one
         String label = device.getName();
+        properties.put(Thing.PROPERTY_MODEL_ID, label);
         if (label == null || label.length() == 0 || label.equals(device.getAddress().toString().replace(':', '-'))) {
             label = "Bluetooth Device";
         }
-
-        Map<String, Object> properties = new HashMap<>();
         properties.put(BluetoothBindingConstants.CONFIGURATION_ADDRESS, device.getAddress().toString());
+        properties.put(Thing.PROPERTY_MAC_ADDRESS, device.getAddress().toString());
         Integer txPower = device.getTxPower();
         if (txPower != null && txPower > 0) {
             properties.put(BluetoothBindingConstants.PROPERTY_TXPOWER, Integer.toString(txPower));

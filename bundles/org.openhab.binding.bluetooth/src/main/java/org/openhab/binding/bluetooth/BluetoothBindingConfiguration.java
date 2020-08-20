@@ -23,12 +23,11 @@ public class BluetoothBindingConfiguration {
     public String kalmanfiltertype = KalmanFilter.FilterType.MODERATE.name();
     public int environmentalfactor = 3;
     public int onlinetimeout = 30;
-    public boolean synchronizemac = true;
 
     public void update(BluetoothBindingConfiguration bluetoothBindingConfiguration) {
         this.kalmanfiltertype = bluetoothBindingConfiguration.kalmanfiltertype;
         this.environmentalfactor = bluetoothBindingConfiguration.environmentalfactor;
         this.onlinetimeout = bluetoothBindingConfiguration.onlinetimeout;
-        this.synchronizemac = bluetoothBindingConfiguration.synchronizemac;
+        ;
     }
 }

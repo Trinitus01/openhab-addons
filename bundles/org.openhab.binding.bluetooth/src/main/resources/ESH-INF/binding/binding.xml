@@ -38,11 +38,6 @@
 			<default>30</default>
 			<required>true</required>
 		</parameter>
-		<parameter name="synchronizemac" type="boolean">
-			<label>Synchronize MAC address (Mobile Phones)</label>
-			<description>Use the device name to synchronize the MAC address.</description>
-			<default>true</default>
-		</parameter>
 	</config-description>
 
 </binding:binding>
